@@ -52,16 +52,16 @@ Referencia validada por: <Reinier Rodriguez Guillen Yainet Garcia Garcia>
 ### Calibracion de dos puntos, una fila por zona (en milivolts)
 | Zona | mV en aire | mV en agua | Separacion (mV) | m (%/mV) | b (%) |
 |------|------------|------------|-----------------|----------|-------|
-| 1    | <2314.9>   | <280.3>    | <2034.7>        | <-0.049148> | <113.7742>    |
-| 2    | <2246.2>   | <913.7>    | <1332.5>        | <-0.075049> | <168.5719>    |
+| 1    | 2314.9   | 280.3    | 2034.7        | -0.049148 | 113.7742    |
+| 2    | 2246.2   | 913.7    | 1332.5        | -0.075049 | 168.5719    |
 
 La pendiente m es NEGATIVA en ambas zonas: a mayor humedad, menor lectura.
 
 Reproducibilidad del punto de agua (se repite al menos dos veces por zona):
 | Zona | Repeticion 1 (mV) | Repeticion 2 (mV) | Diferencia | Cabe en la tolerancia |
 |------|-------------------|-------------------|------------|------------------------|
-| 1    | <>                | <>                | <>         | si / no                |
-| 2    | <>                | <>                | <>         | si / no                |
+| 1    | 283                | 354                | 71mV         | no                |
+| 2    | 310                | 322               | 12mV         | si               |
 
 Si el punto de agua no reproduce, la condicion no esta controlada: casi siempre
 es la profundidad de insercion. No se elige la repeticion que da el resultado
@@ -70,8 +70,8 @@ mas bonito; se controla la condicion y se repiten ambas.
 ### Verificacion en el tercer punto (tierra humeda)
 | Zona | mV  | Porcentaje | Valor SIN recortar | Estable y repetible |
 |------|-----|------------|--------------------|---------------------|
-| 1    | <>  | <>         | <>                 | si / no             |
-| 2    | <>  | <>         | <>                 | si / no             |
+| 1    | 154  | 100%         | 106.2%                 | si / no             |
+| 2    | 220  | 100%        | 151.1%                 | si / no             |
 
 El valor sin recortar importa: un 100 % en pantalla no distingue entre llegar
 justo y pasarse. Si al sumergir el valor real supera 100, la lectura de hoy es
