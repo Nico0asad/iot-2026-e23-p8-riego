@@ -118,3 +118,7 @@ que a la otra.>
 - La dispersion registrada corresponde a la condicion declarada. En otra
   condicion, la dispersion puede ser distinta.
 - P8 es un prototipo educativo.
+
+## Grafo de Estados (FSM)
+
+![Grafo de estados FSM](1000385349 (1).jpg)
