@@ -70,8 +70,8 @@ mas bonito; se controla la condicion y se repiten ambas.
 ### Verificacion en el tercer punto (tierra humeda)
 | Zona | mV  | Porcentaje | Valor SIN recortar | Estable y repetible |
 |------|-----|------------|--------------------|---------------------|
-| 1    | 154  | 100%         | 106.2%                 | si / no             |
-| 2    | 220  | 100%        | 151.1%                 | si / no             |
+| 1    | 154  | 100%         | 106.2%                 | no             |
+| 2    | 220  | 100%        | 151.1%                 | no             |
 
 El valor sin recortar importa: un 100 % en pantalla no distingue entre llegar
 justo y pasarse. Si al sumergir el valor real supera 100, la lectura de hoy es
