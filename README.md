@@ -122,3 +122,56 @@ que a la otra.>
 ## Grafo de Estados (FSM)
 
 ![Grafo de estados FSM](1000385349 (1).jpg)
+
+# Sistema de Riego Automático por Zonas (ESP32)
+
+Este proyecto implementa un sistema de monitoreo y control de riego automático multizona sobre un **ESP32**, gestionado mediante una Máquina de Estados Finitos (FSM) no bloqueante. Incluye monitoreo continuo de humedad del suelo, simulación de riego por LEDs, temporización de confirmación y un estado de parada de emergencia con alarma sonora/luminosa.
+
+---
+
+## 1. Asignación de Pines (Pinout)
+
+| Componente | Pin ESP32 | Modo | Descripción |
+| :--- | :--- | :--- | :--- |
+| **Sensor Humedad Z1** | GPIO 32 | Entrada Analógica | Sensor capacitivo para la Zona 1 |
+| **Sensor Humedad Z2** | GPIO 33 | Entrada Analógica | Sensor capacitivo para la Zona 2 |
+| **LED Riego Z1** | GPIO 17 | Salida Digital | Indicador visual de riego activo en Zona 1 (Verde) |
+| **LED Riego Z2** | GPIO 16 | Salida Digital | Indicador visual de riego activo en Zona 2 (Amarillo) |
+| **LED Alarma / Error** | GPIO 18 | Salida Digital | Indicador de Parada de Emergencia / Estado Seguro (Rojo) |
+| **Buzzer** | GPIO 26 | Salida Digital | Alarma sonora en estado de error |
+| **Botón de Paro / Rearme** | GPIO 25 | `INPUT_PULLDOWN` | Botón físico para activación/desactivación de Paro Seguro |
+
+---
+
+## 2. Calibración de Sensores de Humedad
+
+A continuación se presentan los valores obtenidos en el proceso de calibración de dos puntos ($mV$ en aire vs. $mV$ en agua) para cada zona:
+
+| Zona | $mV$ en Aire (0%) | $mV$ en Agua (100%) | Separación ($mV$) | Pendiente $m$ (%/$mV$) | Intercepto $b$ (%) |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| **Zona 1** | 2314.9 | 280.3 | 2034.7 | -0.049148 | 113.7742 |
+| **Zona 2** | 2246.2 | 913.7 | 1332.5 | -0.075049 | 168.5719 |
+
+---
+
+## 3. Estados de la Máquina de Estados Finitos (FSM)
+
+* **`VIGILANDO`**: Estado por defecto. Monitorea constantemente los niveles de humedad en ambas zonas.
+* **`REGANDO`**: Se activa automáticamente cuando la humedad cae por debajo del umbral mínimo, encendiendo las salidas de riego correspondientes.
+* **`ESPERA_CONFIRMACION`**: Transición temporal sin bloqueos (`millis()`) que verifica la estabilidad de la lectura de humedad una vez alcanzada la meta antes de retornar a supervisión.
+* **`ERROR_SEGURO`**: Parada de emergencia. Se activa al pulsar el botón en **GPIO 25**, apagando las válvulas/LEDs de riego y activando la alarma luminosa (**GPIO 18**) y sonora (**GPIO 26**). Al presionar el botón una segunda vez, el sistema se rearma y vuelve al estado `VIGILANDO`.
+
+---
+
+## 4. Ejecución y Registro de Consola
+
+Salida del Monitor Serie (115200 baudios) confirmando la transición automática entre estados:
+
+```text
+[ 261000 ms] H_Z1=8.4%   H_Z2=100.0% | Estado: REGANDO
+[ 262000 ms] H_Z1=48.0%  H_Z2=100.0% | Estado: REGANDO
+[ 263000 ms] H_Z1=61.1%  H_Z2=100.0% | Estado: REGANDO
+>> Transición -> Estado: ESPERA_CONFIRMACION | Motivo: Zona 1 alcanzo humedad meta
+[ 264000 ms] H_Z1=58.8%  H_Z2=100.0% | Estado: ESPERA_CONFIRMACION
+[ 265000 ms] H_Z1=56.6%  H_Z2=100.0% | Estado: ESPERA_CONFIRMACION
+>> Transición -> Estado: VIGILANDO | Motivo: Humedad estable tras Tconf
