@@ -176,3 +176,18 @@ Salida del Monitor Serie (115200 baudios) confirmando la transición automática
 [ 265000 ms] H_Z1=56.6%  H_Z2=100.0% | Estado: ESPERA_CONFIRMACION
 >> Transición -> Estado: VIGILANDO | Motivo: Humedad estable tras Tconf
 
+## 📡 Jerarquía Oficial de Tópicos MQTT (GT4 - Equipo E23)
+
+El sistema utiliza la convención oficial de tópicos de 4 niveles para la integración con el ecosistema del curso (`curso/ENN/Pxx/nodo`), enviando datos calibrados directamente hacia el colector Telegraf y la base de datos InfluxDB.
+
+| Tópico | QoS | Retained | Dirección | Descripción / Payload |
+| :--- | :---: | :---: | :---: | :--- |
+| `curso/E23/P8/nodo1` | 1 | `true` | ESP32 → Broker | Telemetría principal en JSON con lecturas calibradas de humedad (`humedad_z1`, `humedad_z2`), estado de sensores y potencia RSSI[cite: 22]. |
+| `curso/E23/P8/nodo1/estado` | 1 | `true` | ESP32 → Broker | Canal LWT (Last Will and Testament) y presencia del nodo (`"online"` / `"offline"`)[cite: 22]. |
+| `curso/E23/P8/nodo1/cmd` | 1 | `false` | Broker → ESP32 | Canal de suscripción reservado para comandos de control entrantes (Semana 11)[cite: 22]. |
+
+### 🛠️ Configuración de Conexión
+* **Broker:** `10.0.0.10`[cite: 20, 22]
+* **Puerto:** `1883`[cite: 20, 22]
+* **Client ID:** `E23-nodo1`[cite: 20]
+* **Usuario:** `E23`[cite: 20, 22]
