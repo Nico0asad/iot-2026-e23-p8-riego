@@ -175,6 +175,7 @@ Salida del Monitor Serie (115200 baudios) confirmando la transición automática
 [ 264000 ms] H_Z1=58.8%  H_Z2=100.0% | Estado: ESPERA_CONFIRMACION
 [ 265000 ms] H_Z1=56.6%  H_Z2=100.0% | Estado: ESPERA_CONFIRMACION
 >> Transición -> Estado: VIGILANDO | Motivo: Humedad estable tras Tconf
+```
 
 ## 📡 Jerarquía Oficial de Tópicos MQTT (GT4 - Equipo E23)
 
