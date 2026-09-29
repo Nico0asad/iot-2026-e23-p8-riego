@@ -176,4 +176,3 @@ Salida del Monitor Serie (115200 baudios) confirmando la transición automática
 [ 265000 ms] H_Z1=56.6%  H_Z2=100.0% | Estado: ESPERA_CONFIRMACION
 >> Transición -> Estado: VIGILANDO | Motivo: Humedad estable tras Tconf
 
-TópicoQoSRetainedDirecciónDescripción / Payloadcurso/E23/P8/nodo11truePublicación (ESP32 $\rightarrow$ Broker)Datos calibrados en JSON (humedad_z1, humedad_z2, sensor_ok, rssi_dbm).   curso/E23/P8/nodo1/estado1trueLWT / Estado (ESP32 $\rightarrow$ Broker)Estado de presencia del nodo (online / offline).   curso/E23/P8/nodo1/cmd1falseSuscripción (Broker $\rightarrow$ ESP32)Canal reservado para comandos de control entrantes.   
