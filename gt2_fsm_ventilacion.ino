@@ -45,6 +45,17 @@
 // 1. Constantes de Hardware, Pines y Umbrales
 // ---------------------------------------------------------------------------
 #include <Arduino.h>
+#include <Wire.h> 
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include "config.h"
+
+
+// Pantalla OLED en G21 (SDA) y G22 (SCL)
+Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 
 // Pines de entrada analógica (Sensores de Humedad Capacitivos)
 const uint8_t PIN_SENSOR_Z1 = 32;
@@ -55,6 +66,14 @@ const uint8_t PIN_LED_Z1  = 17; // LED Verde (Riego Zona 1)
 const uint8_t PIN_LED_Z2  = 16; // LED Azul/Amarillo (Riego Zona 2)
 const uint8_t PIN_LED_ERR = 18; // LED Rojo (Error / Paro)
 const uint8_t PIN_BUZZER  = 26; // Buzzer
+
+// Pines de salida para Relés (Bombas de agua / Válvulas)
+const uint8_t PIN_RELE_Z1 = 27; // Cambia al GPIO donde conectaste IN1
+const uint8_t PIN_RELE_Z2 = 5; // Cambia al GPIO donde conectaste IN2
+
+// Lógica de activación del relé (los módulos azules suelen activar con LOW)
+#define RELE_ON  LOW
+#define RELE_OFF HIGH
 
 // Pin de entrada para Botón de Paro/Rearme
 const uint8_t PIN_BOTON   = 25;
@@ -98,12 +117,30 @@ uint8_t zonaActiva = 0; // 1 para Zona 1, 2 para Zona 2
 uint32_t t_medicion = 0;
 uint32_t t_entrada  = 0;
 
+// --- VARIABLES Y CLIENTES MQTT (GT4) ---
+WiFiClient   red;
+PubSubClient mqtt(red);
+
+String clientId, topicDatos, topicEstado, topicCmd;
+
+uint32_t t_pub       = 0;
+uint32_t tWiFi       = 0;
+uint32_t tReconexion = 0;
+
+const uint32_t PERIODO_PUB_MS   = 10000; // Publicación cada 10 s
+const uint32_t REINTENTO_WIFI_MS = 15000;
+const uint32_t ESPERA_INICIAL    = 2000;
+const uint32_t ESPERA_MAXIMA     = 30000;
+uint32_t esperaReconexion        = ESPERA_INICIAL;
+bool sensorOk                    = true;
 // Función para cambio de estado e impresión por Consola Serie
 void cambiar(Estado nuevo, const char* razon) {
   estado = nuevo;
   t_entrada = millis();
   Serial.printf(">> Transición -> Estado: %s | Motivo: %s\n", nombreEstado(estado), razon);
 }
+
+// HASTA ESTA LINEA LLEGA EL PASO 1 (POR SI DEBO BORRAR ESTO)
 
 const char* nombreEstado(Estado e) {
   switch (e) {
@@ -131,23 +168,110 @@ float leerHumedadPct(uint8_t pin, float v_aire, float v_agua) {
   return constrain(pct, 0.0, 100.0);
 }
 
-// Control centralizado de LEDs de zonas y error, más el Buzzer
-void ledsYBuzzer(bool ledZ1, bool ledZ2, bool ledErr, bool buzz) {
-  digitalWrite(PIN_LED_Z1, ledZ1 ? HIGH : LOW);
-  digitalWrite(PIN_LED_Z2, ledZ2 ? HIGH : LOW);
-  digitalWrite(PIN_LED_ERR, ledErr ? HIGH : LOW);
-  digitalWrite(PIN_BUZZER, buzz ? HIGH : LOW);
+// ---------------------------------------------------------------------------
+// FUNCIONES DE RED Y MQTT (GT4) - PASO 2
+// ---------------------------------------------------------------------------
+
+void recibirComando(char* topic, byte* payload, unsigned int largo) {
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, payload, largo);
+  if (error) {
+    Serial.printf("[cmd] JSON invalido en %s: %s\n", topic, error.c_str());
+    return;
+  }
+  Serial.printf("[cmd] Recibido en %s\n", topic);
 }
 
-// Detección de flanco de subida para el botón (antirrebote sin delay)
+void mantenerWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  
+  uint32_t ahora = millis();
+  if (ahora - tWiFi < REINTENTO_WIFI_MS) return;
+  tWiFi = ahora;
+
+  Serial.println("[WiFi] Reintentando conexion limpia a IoT-Lab...");
+  WiFi.disconnect(true); // Desconecta y borra la sesión previa para liberar el driver
+  delay(100);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+}
+
+void mantenerMQTT() {
+  if (mqtt.connected()) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  uint32_t ahora = millis();
+  if (ahora - tReconexion < esperaReconexion) return;
+  tReconexion = ahora;
+
+  Serial.printf("[MQTT] Conectando como %s ... ", clientId.c_str());
+  
+  if (mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS,
+                   topicEstado.c_str(), 1, true, "offline")) {
+    Serial.println("OK -> Connected to MQTT broker");
+    mqtt.publish(topicEstado.c_str(), "online", true);
+    mqtt.subscribe(topicCmd.c_str(), 1);
+    esperaReconexion = ESPERA_INICIAL;
+  } else {
+    Serial.printf("FALLO rc=%d (reintento en %u s)\n", mqtt.state(), esperaReconexion / 1000);
+    esperaReconexion = (esperaReconexion * 2 > ESPERA_MAXIMA) ? ESPERA_MAXIMA : esperaReconexion * 2;
+  }
+}
+
+void publicarDatos() {
+  if (!mqtt.connected()) return;
+
+  JsonDocument doc;
+  if (sensorOk) {
+    doc["humedad_z1"] = roundf(humedadZ1 * 10.0f) / 10.0f;
+    doc["humedad_z2"] = roundf(humedadZ2 * 10.0f) / 10.0f;
+  }
+  doc["sensor_ok"] = sensorOk ? 1 : 0;
+  doc["rssi_dbm"]  = WiFi.RSSI();
+
+  char payload[256];
+  size_t n = serializeJson(doc, payload, sizeof(payload));
+
+  if (mqtt.publish(topicDatos.c_str(), (const uint8_t*)payload, n, true)) {
+    Serial.printf("[PUB] %s -> %s\n", topicDatos.c_str(), payload);
+  } else {
+    Serial.println("[PUB] Error al publicar payload");
+  }
+}
+
+//HASTA ESA LINEA LLEGA EL PASO 2 (POR SI DEBO BORRAR ESTO)
+
+void ledsYBuzzer(bool z1, bool z2, bool err, bool buz) {
+  // Control de LEDs
+  digitalWrite(PIN_LED_Z1, z1 ? HIGH : LOW);
+  digitalWrite(PIN_LED_Z2, z2 ? HIGH : LOW);
+  digitalWrite(PIN_LED_ERR, err ? HIGH : LOW);
+  digitalWrite(PIN_BUZZER, buz ? HIGH : LOW);
+
+  // Control de Relés (Bombas)
+  digitalWrite(PIN_RELE_Z1, z1 ? RELE_ON : RELE_OFF);
+  digitalWrite(PIN_RELE_Z2, z2 ? RELE_ON : RELE_OFF);
+}
+// Detección de botón filtrada contra ruido inductivo de la bomba
 bool botonPulsado() {
   static uint32_t t_ultimo = 0;
-  static bool nivel_prev = false;
-  bool nivel = digitalRead(PIN_BOTON) == HIGH;
-  bool flanco = nivel && !nivel_prev && (millis() - t_ultimo >= T_ANTIRREBOTE_MS);
-  if (flanco) t_ultimo = millis();
-  nivel_prev = nivel;
-  return flanco;
+  static uint8_t lecturas_consecutivas = 0;
+  
+  if (millis() - t_ultimo >= 50) { // Evalúa cada 50 ms
+    t_ultimo = millis();
+    
+    if (digitalRead(PIN_BOTON) == HIGH) {
+      lecturas_consecutivas++;
+    } else {
+      lecturas_consecutivas = 0; // Si fue solo un chispazo rápido, se limpia
+    }
+  }
+  
+  // Solo activa el Paro si el botón se mantiene presionado 3 veces seguidas (150 ms)
+  if (lecturas_consecutivas >= 3) {
+    lecturas_consecutivas = 0;
+    return true;
+  }
+  return false;
 }
 
 void setup() {
@@ -159,6 +283,14 @@ void setup() {
   pinMode(PIN_LED_ERR, OUTPUT);
   pinMode(PIN_BUZZER, OUTPUT);
   
+  // Configuración de salidas para Relés
+  pinMode(PIN_RELE_Z1, OUTPUT);
+  pinMode(PIN_RELE_Z2, OUTPUT);
+
+  // Asegurar estado inicial apagado
+  digitalWrite(PIN_RELE_Z1, RELE_OFF);
+  digitalWrite(PIN_RELE_Z2, RELE_OFF);
+
   // Configuración de entrada para el Botón
   pinMode(PIN_BOTON, INPUT_PULLDOWN);
 
@@ -170,7 +302,11 @@ void setup() {
   digitalWrite(PIN_LED_Z2, LOW);
   digitalWrite(PIN_LED_ERR, LOW);
   digitalWrite(PIN_BUZZER, LOW);
-
+// --- PARTE 2: Inicializar bus I2C y Pantalla OLED ---
+  Wire.begin(21, 22); // SDA en GPIO 21, SCL en GPIO 22
+  if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3c)) {
+    Serial.println("Error: No se detecto la pantalla OLED SSD1306");
+  }
   // Encabezado de arranque
   Serial.println();
   Serial.println("========================================================");
@@ -181,12 +317,81 @@ void setup() {
   Serial.println("========================================================");
 
   cambiar(VIGILANDO, "arranque");
+
+// --- CONFIGURACIÓN DE RED Y TÓPICOS MQTT (GT4 - PASO 3) ---
+  clientId    = String(MQTT_USER) + "-" + NODO;
+  topicDatos  = String("curso/") + MQTT_USER + "/" + PROYECTO + "/" + NODO;
+  topicEstado = topicDatos + "/estado";
+  topicCmd    = topicDatos + "/cmd";
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  uint32_t inicio = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - inicio < 10000) {
+    delay(200);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("[WiFi] Conectado. IP local = ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("[WiFi] Sin red inicial; continuando en modo local.");
+  }
+  tWiFi = millis();
+
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setCallback(recibirComando);
+  mqtt.setBufferSize(512);
+  mqtt.setKeepAlive(15);
+  mqtt.setSocketTimeout(3);
 }
+
+void actualizarOLED() {
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+
+  // Titulo
+  oled.setCursor(0, 0);
+  oled.println(F("-- RIEGO P8 --"));
+
+  // Estado actual
+ // Estado actual
+  oled.setCursor(0, 16);
+  oled.print(F("Est: "));
+  oled.println(nombreEstado(estado));
+  // Lecturas
+  oled.setCursor(0, 32);
+  oled.print(F("H_Z1: ")); oled.print(humedadZ1, 1); oled.println(F("%"));
+
+  oled.setCursor(0, 48);
+  oled.print(F("H_Z2: ")); oled.print(humedadZ2, 1); oled.println(F("%"));
+
+  oled.display();
+}
+
+//FINAL PASO 3 (POR SI LO DEBO BORRAR) 
 
 // ---------------------------------------------------------------------------
 // 4. Lazo principal (FSM no bloqueante)
 // ---------------------------------------------------------------------------
 void loop() {
+
+// --- MANTENER RED Y PUBLICAR (GT4 - PASO 4) ---
+  mantenerWiFi();
+  mantenerMQTT();
+  mqtt.loop();
+
+  uint32_t ahora = millis();
+  if (ahora - t_pub >= PERIODO_PUB_MS) {
+    t_pub = ahora;
+    publicarDatos();
+  }
   // Muestreo cada 1 segundo sin bloquear
   if (millis() - t_medicion >= PERIODO_MED_MS) {
     t_medicion = millis();
@@ -195,6 +400,7 @@ humedadZ2 = leerHumedadPct(PIN_SENSOR_Z2, Z2_V_AIRE, Z2_V_AGUA);
 
     Serial.printf("[%8lu ms] H_Z1=%.1f%%  H_Z2=%.1f%%  | Estado: %s\n",
                   millis(), humedadZ1, humedadZ2, nombreEstado(estado));
+    actualizarOLED(); // <--- AGREGA SOLO ESTA LÍNEA AQUÍ
   }
 
   // Evaluación de la Máquina de Estados (FSM)
@@ -203,28 +409,25 @@ humedadZ2 = leerHumedadPct(PIN_SENSOR_Z2, Z2_V_AIRE, Z2_V_AGUA);
     case VIGILANDO:
       ledsYBuzzer(false, false, false, false);
 
-      if (humedadZ1 <= Z1_ACTIVA_PCT) {
-        zonaActiva = 1;
-        cambiar(REGANDO, "Zona 1 requiere riego");
-      } else if (humedadZ2 <= Z2_ACTIVA_PCT) {
-        zonaActiva = 2;
-        cambiar(REGANDO, "Zona 2 requiere riego");
+      // Entra a REGANDO si cualquiera de las dos zonas necesita agua
+      if (humedadZ1 <= Z1_ACTIVA_PCT || humedadZ2 <= Z2_ACTIVA_PCT) {
+        cambiar(REGANDO, "Humedad bajo umbral de activacion");
       }
       break;
 
-    case REGANDO:
-      if (zonaActiva == 1) {
-        ledsYBuzzer(true, false, false, false); // LED G17 (Zona 1)
-        if (humedadZ1 >= Z1_DESACT_PCT) {
-          cambiar(ESPERA_CONFIRMACION, "Zona 1 alcanzo humedad meta");
-        }
-      } else {
-        ledsYBuzzer(false, true, false, false); // LED G16 (Zona 2)
-        if (humedadZ2 >= Z2_DESACT_PCT) {
-          cambiar(ESPERA_CONFIRMACION, "Zona 2 alcanzo humedad meta");
-        }
+    case REGANDO: {
+      // Activa cada relé de forma independiente según su humedad
+      bool regarZ1 = (humedadZ1 < Z1_DESACT_PCT);
+      bool regarZ2 = (humedadZ2 < Z2_DESACT_PCT);
+
+      ledsYBuzzer(regarZ1, regarZ2, false, false);
+
+      // Si ambas zonas terminan de regar, pasa a confirmación
+      if (!regarZ1 && !regarZ2) {
+        cambiar(ESPERA_CONFIRMACION, "Ambas zonas alcanzaron la humedad meta");
       }
       break;
+    }
 
     case ESPERA_CONFIRMACION:
       ledsYBuzzer(false, false, false, false);
@@ -249,6 +452,7 @@ humedadZ2 = leerHumedadPct(PIN_SENSOR_Z2, Z2_V_AIRE, Z2_V_AGUA);
     cambiar(ERROR_SEGURO, "Boton: Paro de emergencia");
   }
 }
+
 
 /* ---------------------------------------------------------------------------
    PARA ADAPTAR A SU PROYECTO (items 7 y 8)
