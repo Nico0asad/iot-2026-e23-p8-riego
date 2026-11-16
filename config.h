@@ -1,0 +1,20 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// --- Red WiFi del Laboratorio ---
+const char* WIFI_SSID = "IoT-Lab"; 
+const char* WIFI_PASS = "iot2026est";
+
+// --- Servidor MQTT ---
+const char* MQTT_HOST = "10.0.0.10";
+const uint16_t MQTT_PORT = 1883;
+
+// --- Credenciales del Equipo (Ficha E23) ---
+#define MQTT_USER "E23"             // Con E MAYÚSCULA
+#define MQTT_PASS "s7OrE90cAQuN"     // Posición 3: O mayúscula | Posición 7: cero (0)
+
+// --- Identificadores de Proyecto ---
+#define PROYECTO  "P8"              // P8 en mayúscula
+#define NODO      "nodo1"           // nodo1 en minúscula
+
+#endif
